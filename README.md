@@ -42,7 +42,10 @@ _validate_pbir.py       gate: report JSON against the PBIR schema  -> ALL VALID
 _check_model_names.py   gate: TMDL measure/column name collisions  -> NAMES OK
 themes/                 5 prebuilt Power BI themes
 pbip_template/          Microsoft base theme shipped inside a project
-tests/                  see the warning below
+tests/_test_v2.py       scaffold + TMDL + every visual family + templates
+tests/_test_design.py   design layer: KPI tiles, DAX context, brand styles
+tests/generate_data.py  seeded synthetic hiring-funnel CSV (never committed)
+tests/fixtures/         make_fixture.py + golden/ — the regression net
 ```
 
 Modules import each other by bare name, so run with the repo root on
@@ -83,26 +86,43 @@ python _validate_pbir.py out/sales.Report
 
 Ordered by what blocks an unattended Linux run.
 
-### 1. Tests have no fixture — fix first
+### 1. Tests — done, with one honest limit
 
-Absolute paths are gone: both suites now resolve the repo root from
-`__file__`, read themes through `THEMES_DIR`, and take the one remaining
-external input from an environment variable. `tests/generate_data.py` writes
-to `tests/fixtures/` by default (override with `PBIMAKE_FIXTURE_OUT`).
-
-What is still missing is a **fixture**. Sections 1-2 of `_test_v2.py` compare
-generated output against a project Power BI Desktop produced itself, so they
-need a real one:
+Both suites run unattended with **no environment variables, no Power BI and no
+Windows**:
 
 ```bash
-PBIMAKE_ECOM_DIR=/path/to/a/real/pbip/project python tests/_test_v2.py
+python tests/_test_v2.py        # 86 checks
+python tests/_test_design.py    # 92 checks
 ```
 
-Unset, those sections fail rather than skip. The job is to generate that
-fixture in-repo — scaffold a project, commit the expected TMDL and visual
-JSON as golden files — so the suite runs unattended with no Power BI anywhere.
-Until then there is no regression safety net, so do this before touching
-anything else.
+`tests/fixtures/make_fixture.py` is the regression net. It generates the CSV
+(seeded, so reproducible), scaffolds a project, writes a representative model
+and builds one visual per family — card, kpi_tile, bar, line, funnel, scatter,
+treemap, table — then compares every emitted TMDL and `visual.json` against the
+golden copies in `tests/fixtures/golden/`:
+
+```bash
+python tests/fixtures/make_fixture.py                # build + compare
+python tests/fixtures/make_fixture.py --write-golden # re-record after an intended change
+```
+
+**What the goldens prove, and what they do not.** They were produced by this
+repo's own builders, so they can only show that the emitted JSON/TMDL has not
+*changed*. They cannot show that it is what Power BI expects, because nothing
+in the suite ever opened the file. Checking the output against a
+Desktop-authored project stays a Windows job.
+
+Two things the suites deliberately report as SKIP rather than PASS:
+
+- **Glyph icons.** `add_icon` and the background's icon glyphs need Segoe MDL2
+  Assets (gap 2 below). Geometry — icon tile, logo tile, nav rail — is still
+  checked; only the glyph drawn inside it is not.
+- **The PBIR schema gate.** `_validate_pbir.py` fetches Microsoft's schemas
+  over HTTPS and caches them in `_schema_cache/`, which is gitignored. With no
+  warm cache and no route to `developer.microsoft.com` it cannot run at all, so
+  the suite skips it instead of reporting a false pass. Either give the test
+  machine network once, or decide to commit the schema cache.
 
 ### 2. Fonts — a decision, not a patch
 

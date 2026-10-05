@@ -9,19 +9,27 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(HERE))
+ROOT = os.path.dirname(HERE)          # the gate scripts live at the repo root
+sys.path.insert(0, ROOT)
+sys.path.insert(0, HERE)
+from _offline import SCHEMA_SKIP_REASON, schemas_available
 import pbip_scaffold
 from design_measures import add_highlight_color, add_kpi_context
 from layout_templates import KPI_TILE_H, executive_hero
 from pbir_editor import STYLES, THEMES_DIR, PbirEditor
 from tmdl_editor import TmdlModel
 
-PASS, FAIL = [], []
+PASS, FAIL, SKIP = [], [], []
 
 
 def check(label, cond, detail=""):
     (PASS if cond else FAIL).append(label)
     print(("  ok   " if cond else "  FAIL ") + label + (f" — {detail}" if detail and not cond else ""))
+
+
+def skip(label, reason):
+    SKIP.append(f"{label} — {reason}")
+    print(f"  SKIP {label} — {reason}")
 
 
 print("== 1. Theme fonts: no missing 'DIN' face ==")
@@ -162,6 +170,12 @@ check("bar fill uses instance wildcard selector",
       dp["selector"]["data"][0]["dataViewWildcard"]["matchingOption"] == 1)
 
 print("\n== 5. Background: one slot per tile, icon tile drawn ==")
+# The icon TILE (geometry + color) is checked below. The white glyph inside it
+# needs Segoe MDL2 Assets, which is Windows-only and deliberately not
+# substituted (BRIEF.md), so bg_generator skips it here and warns on stderr.
+from icon_generator import FONT_PATH as _MDL2
+if not os.path.exists(_MDL2):
+    skip("icon glyph inside the tile", "Segoe MDL2 Assets absent — tile drawn, glyph not")
 from PIL import Image
 bg = glob.glob(os.path.join(paths["report"], "StaticResources", "RegisteredResources",
                             "bg_*.png"))
@@ -328,17 +342,23 @@ for name in ("midnight_indigo", "executive_blue"):
         os.path.join(THEMES_DIR, f"professional_{name}.json")))
 
 print("\n== 6. Schema validation ==")
-r = subprocess.run([sys.executable, os.path.join(HERE, "_validate_pbir.py"), paths["report"]],
-                   capture_output=True, text=True, encoding="utf-8")
-tail = (r.stdout or "").strip().splitlines()[-1:] or ["(no output)"]
-check("PBIR schema: ALL VALID", r.returncode == 0 and "ALL VALID" in tail[0],
-      (r.stdout or "")[-1500:] + (r.stderr or "")[-800:])
-r = subprocess.run([sys.executable, os.path.join(HERE, "_check_model_names.py"), TMP],
+if schemas_available():
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "_validate_pbir.py"), paths["report"]],
+                       capture_output=True, text=True, encoding="utf-8")
+    tail = (r.stdout or "").strip().splitlines()[-1:] or ["(no output)"]
+    check("PBIR schema: ALL VALID", r.returncode == 0 and "ALL VALID" in tail[0],
+          (r.stdout or "")[-1500:] + (r.stderr or "")[-800:])
+else:
+    skip("PBIR schema: ALL VALID", SCHEMA_SKIP_REASON)
+r = subprocess.run([sys.executable, os.path.join(ROOT, "_check_model_names.py"), TMP],
                    capture_output=True, text=True, encoding="utf-8")
 check("model names OK", r.returncode == 0, (r.stdout or "")[-800:])
 
 print("\n" + "=" * 60)
-print(f"PASS: {len(PASS)}   FAIL: {len(FAIL)}")
+print(f"PASS: {len(PASS)}   FAIL: {len(FAIL)}   SKIP: {len(SKIP)}")
+if SKIP:
+    print("SKIPPED (not coverage — needs Windows fonts or network):\n  "
+          + "\n  ".join(SKIP))
 if FAIL:
     print("FAILED:\n  " + "\n  ".join(FAIL))
     sys.exit(1)

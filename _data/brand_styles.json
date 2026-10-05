@@ -1,0 +1,71 @@
+{
+  "midnight_indigo": {
+    "page_bg": "#131320",
+    "card_bg": "#1D1D30",
+    "secondary_bg": "#26263B",
+    "border": "#353654",
+    "text_primary": "#F2F4F8",
+    "text_secondary": "#A7A8BE",
+    "accent": "#6366F1",
+    "muted": "#4B4C6C",
+    "positive": "#22C55E",
+    "negative": "#F43F5E",
+    "neutral": "#F59E0B",
+    "accent_tint": "#202160",
+    "tile_colors": [
+      "#6366F1",
+      "#B643DB",
+      "#D77B30",
+      "#20A962",
+      "#DB4349",
+      "#369BD9"
+    ],
+    "data_colors": [
+      "#6366F1",
+      "#7C7EF3",
+      "#DB8743",
+      "#43DB8C",
+      "#B643DB",
+      "#F59E0B",
+      "#22C55E",
+      "#DB4349"
+    ],
+    "brand": "#6366F1",
+    "mode": "dark"
+  },
+  "executive_blue": {
+    "page_bg": "#F3F5F9",
+    "card_bg": "#FFFFFF",
+    "secondary_bg": "#EBEEF4",
+    "border": "#DADDE7",
+    "text_primary": "#1F2328",
+    "text_secondary": "#5E6578",
+    "accent": "#1D4ED8",
+    "muted": "#CFD3DE",
+    "positive": "#15803D",
+    "negative": "#DC2626",
+    "neutral": "#D97706",
+    "header_fill": true,
+    "accent_tint": "#DAE0F1",
+    "tile_colors": [
+      "#1D4ED8",
+      "#7829C2",
+      "#C26E29",
+      "#24A943",
+      "#C22954",
+      "#26A2B5"
+    ],
+    "data_colors": [
+      "#1D4ED8",
+      "#547BE8",
+      "#C26E29",
+      "#29C24D",
+      "#7829C2",
+      "#D97706",
+      "#15803D",
+      "#C22954"
+    ],
+    "brand": "#1D4ED8",
+    "mode": "light"
+  }
+}

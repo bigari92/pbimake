@@ -26,6 +26,7 @@ rounded corners and shadows.
 """
 
 import os
+import sys
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 # Header text metrics (px at 1x scale)
@@ -39,14 +40,39 @@ ICON_TILE_PX  = 36   # KPI tile icon square (matches pbir_editor.add_kpi_tile)
 ICON_TILE_PAD = 14
 
 
+_GLYPHS_WARNED = False
+
+
+def _glyph_font_or_none(px: int):
+    """Segoe MDL2 Assets at px, or None when the font is not installed.
+
+    icon_generator._glyph_font deliberately refuses to substitute another face,
+    because a substitute renders tofu boxes rather than icons. This is the
+    background's equivalent of that refusal: drop the glyph, say so once on
+    stderr, and leave every piece of geometry around it untouched — so the
+    layout a Windows render would produce is identical except for the glyphs.
+    """
+    global _GLYPHS_WARNED
+    from icon_generator import _glyph_font
+    try:
+        return _glyph_font(px)
+    except FileNotFoundError as ex:
+        if not _GLYPHS_WARNED:
+            _GLYPHS_WARNED = True
+            print(f"  [warn] background drawn WITHOUT glyph icons: {ex}",
+                  file=sys.stderr)
+        return None
+
+
 def _icon_tile(draw, x: int, y: int, size: int, glyph: str, color: str) -> None:
     """Rounded square in the KPI's color with its glyph knocked out in white."""
-    from icon_generator import GLYPHS, _glyph_font
+    from icon_generator import GLYPHS
     draw.rounded_rectangle((x, y, x + size, y + size), radius=int(size * 0.26),
                            fill=color)
-    ch = GLYPHS.get(glyph, glyph)
-    font = _glyph_font(int(size * 0.5))
-    draw.text((x + size / 2, y + size / 2), ch, font=font,
+    font = _glyph_font_or_none(int(size * 0.5))
+    if font is None:
+        return
+    draw.text((x + size / 2, y + size / 2), GLYPHS.get(glyph, glyph), font=font,
               fill=(255, 255, 255, 255), anchor="mm")
 
 
@@ -136,10 +162,10 @@ def generate_background(out_path: str, width: int, height: int, colors: dict,
                 draw.text((bx, 52 * s), _fit(draw, nav_rail["tagline"], tfont, bw),
                           font=tfont, fill=colors["text_secondary"], anchor="lm")
             draw.rectangle((16 * s, 76 * s, rail_w - 16 * s, 77 * s), fill=border_c)
-            from icon_generator import GLYPHS, _glyph_font
-            gfont = _glyph_font(16 * s)
+            from icon_generator import GLYPHS
+            gfont = _glyph_font_or_none(16 * s)
             ix = nav_rail.get("icon_x", 30) * s
-            for it in nav_rail.get("items", []):
+            for it in (nav_rail.get("items", []) if gfont else []):
                 cy = (it["y"] + it["h"] / 2) * s
                 col = colors["text_primary"] if it.get("active") else colors["text_secondary"]
                 draw.text((ix, cy), GLYPHS.get(it["glyph"], it["glyph"]), font=gfont,

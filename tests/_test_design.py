@@ -328,12 +328,12 @@ for name in ("midnight_indigo", "executive_blue"):
         os.path.join(THEMES_DIR, f"professional_{name}.json")))
 
 print("\n== 6. Schema validation ==")
-r = subprocess.run([sys.executable, os.path.join(HERE, "_validate_pbir.py"), paths["report"]],
+r = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "_validate_pbir.py"), paths["report"]],
                    capture_output=True, text=True, encoding="utf-8")
 tail = (r.stdout or "").strip().splitlines()[-1:] or ["(no output)"]
 check("PBIR schema: ALL VALID", r.returncode == 0 and "ALL VALID" in tail[0],
       (r.stdout or "")[-1500:] + (r.stderr or "")[-800:])
-r = subprocess.run([sys.executable, os.path.join(HERE, "_check_model_names.py"), TMP],
+r = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "_check_model_names.py"), TMP],
                    capture_output=True, text=True, encoding="utf-8")
 check("model names OK", r.returncode == 0, (r.stdout or "")[-800:])
 

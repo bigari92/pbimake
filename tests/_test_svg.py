@@ -16,23 +16,30 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(HERE)          # the gate scripts live at the repo root
 sys.path.insert(0, ROOT)
+sys.path.insert(0, HERE)
 
 import pbip_scaffold                                                # noqa: E402
 import svg_measures as S                                            # noqa: E402
 from brand_styles import (SVG_TOKENS, derive_theme_pair, svg_tokens,  # noqa: E402
                           token_contrast)
+from _offline import SCHEMA_SKIP_REASON, schemas_available          # noqa: E402
 from pbir_editor import STYLES, PbirEditor                          # noqa: E402
 from tmdl_editor import TmdlModel                                    # noqa: E402
 
-PASS, FAIL = [], []
+PASS, FAIL, SKIP = [], [], []
 
 
 def check(label, cond, detail=""):
     (PASS if cond else FAIL).append(label)
     print(("  ok   " if cond else "  FAIL ") + label
           + (" — %s" % detail if detail and not cond else ""))
+
+
+def skip(label, reason):
+    SKIP.append("%s — %s" % (label, reason))
+    print("  SKIP %s — %s" % (label, reason))
 
 
 def raises(label, fn, exc=Exception):
@@ -292,9 +299,15 @@ def gate(script, target, want):
     return want in (r.stdout or ""), r.returncode, (r.stdout or "")[-1200:]
 
 
+HAVE_SCHEMAS = schemas_available()
 for script, target, want in [("_check_model_names.py", TMP, "NAMES OK"),
                              ("_validate_pbir.py", paths["report"], "ALL VALID"),
                              ("_validate_svg_measures.py", TMP, "SVG MEASURES OK")]:
+    # the PBIR gate fetches Microsoft's schemas; unreachable and uncached, it
+    # cannot run at all, and a skip beats a false failure
+    if script == "_validate_pbir.py" and not HAVE_SCHEMAS:
+        skip("gate %s prints %s" % (script, want), SCHEMA_SKIP_REASON)
+        continue
     ok, rc, out = gate(script, target, want)
     check("gate %s prints %s" % (script, want), ok, out)
     if script == "_validate_svg_measures.py":
@@ -361,7 +374,7 @@ check("the gate still passes the untouched project", rc == 0, out[-400:])
 shutil.rmtree(MUT, ignore_errors=True)
 
 print("\n" + "=" * 62)
-print("PASS: %d   FAIL: %d" % (len(PASS), len(FAIL)))
+print("PASS: %d   FAIL: %d   SKIP: %d" % (len(PASS), len(FAIL), len(SKIP)))
 if FAIL:
     print("FAILED:\n  " + "\n  ".join(FAIL))
     sys.exit(1)

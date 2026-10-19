@@ -1,0 +1,241 @@
+table hiring
+	lineageTag: <guid>
+
+	measure Applications = COUNTROWS('hiring')
+		formatString: #,0
+		lineageTag: <guid>
+
+	measure Screened = CALCULATE(COUNTROWS('hiring'), 'hiring'[reached_screen] = 1)
+		formatString: #,0
+		lineageTag: <guid>
+
+	measure Interviewed = CALCULATE(COUNTROWS('hiring'), 'hiring'[reached_interview] = 1)
+		formatString: #,0
+		lineageTag: <guid>
+
+	measure Offers = CALCULATE(COUNTROWS('hiring'), 'hiring'[reached_offer] = 1)
+		formatString: #,0
+		lineageTag: <guid>
+
+	measure Hires = CALCULATE(COUNTROWS('hiring'), 'hiring'[reached_hire] = 1)
+		formatString: #,0
+		lineageTag: <guid>
+
+	measure 'Placement fees' = SUM('hiring'[placement_fee_eur])
+		formatString: EUR#,0
+		lineageTag: <guid>
+
+	measure 'Hire rate' = DIVIDE([Hires], [Applications], 0)
+		formatString: 0.0%
+		lineageTag: <guid>
+
+	/// mean days_to_hire over hired applications only
+	measure 'Avg days to hire' = AVERAGE('hiring'[days_to_hire])
+		formatString: #,0.0
+		lineageTag: <guid>
+
+	/// share of offers that were accepted
+	measure 'Offer acceptance' =
+			VAR _offers = [Offers]
+			VAR _hires = [Hires]
+			RETURN DIVIDE(_hires, _offers, 0)
+		formatString: 0.0%
+		lineageTag: <guid>
+
+	/// Applications: last complete month vs the month before. BLANK when the prior period is not fully covered by the data.
+	measure 'Applications change' =
+			VAR _dataMin = CALCULATE(MIN('hiring'[applied_date]), REMOVEFILTERS('hiring'))
+			VAR _maxDate = MIN(MAX('hiring'[applied_date]), DATE(2026, 9, 19))
+			VAR _minDate = MIN('hiring'[applied_date])
+			VAR _lastDay = DATE(YEAR(_maxDate), MONTH(_maxDate), DAY(_maxDate))
+			VAR _curEnd = IF(_lastDay = EOMONTH(_lastDay, 0), _lastDay + 1, EOMONTH(_lastDay, -1) + 1)
+			VAR _curStart = EOMONTH(_curEnd - 1, -1) + 1
+			VAR _prevEnd = _curStart
+			VAR _prevStart = EOMONTH(_prevEnd - 1, -1) + 1
+			VAR _covered = DATE(YEAR(_dataMin), MONTH(_dataMin), DAY(_dataMin)) <= _prevStart
+			VAR _cur = CALCULATE([Applications], REMOVEFILTERS('hiring'[applied_date], 'hiring'[applied_month]), 'hiring'[applied_date] >= _curStart, 'hiring'[applied_date] < _curEnd)
+			VAR _prev = CALCULATE([Applications], REMOVEFILTERS('hiring'[applied_date], 'hiring'[applied_month]), 'hiring'[applied_date] >= _prevStart, 'hiring'[applied_date] < _prevEnd)
+			RETURN IF(_covered && NOT ISBLANK(_cur) && NOT ISBLANK(_prev), DIVIDE(_cur - _prev, _prev))
+		formatString: +0.0%;-0.0%;0.0%
+		lineageTag: <guid>
+		displayFolder: Design measures
+
+	/// Display text for the Applications KPI tile context line.
+	measure 'Applications change label' =
+			VAR _dataMin = CALCULATE(MIN('hiring'[applied_date]), REMOVEFILTERS('hiring'))
+			VAR _maxDate = MIN(MAX('hiring'[applied_date]), DATE(2026, 9, 19))
+			VAR _minDate = MIN('hiring'[applied_date])
+			VAR _lastDay = DATE(YEAR(_maxDate), MONTH(_maxDate), DAY(_maxDate))
+			VAR _curEnd = IF(_lastDay = EOMONTH(_lastDay, 0), _lastDay + 1, EOMONTH(_lastDay, -1) + 1)
+			VAR _curStart = EOMONTH(_curEnd - 1, -1) + 1
+			VAR _prevEnd = _curStart
+			VAR _prevStart = EOMONTH(_prevEnd - 1, -1) + 1
+			VAR _covered = DATE(YEAR(_dataMin), MONTH(_dataMin), DAY(_dataMin)) <= _prevStart
+			VAR _chg = [Applications change]
+			RETURN IF(ISBLANK(_chg), "No complete prior month",
+			    IF(_chg > 0, "▲ ", IF(_chg < 0, "▼ ", "■ ")) & FORMAT(ABS(_chg), "0.0%") & " " & FORMAT(_curStart, "mmm") & " vs " & FORMAT(_prevStart, "mmm"))
+		lineageTag: <guid>
+		displayFolder: Design measures
+
+	/// Hex color for the Applications context line (higher is better).
+	measure 'Applications change color' =
+			VAR _chg = [Applications change]
+			RETURN SWITCH(TRUE(),
+			    ISBLANK(_chg) || _chg = 0, "#A0A8BC",
+			    _chg > 0, "#06D6A0",
+			    "#F72585")
+		lineageTag: <guid>
+		displayFolder: Design measures
+
+	/// Applications by month, complete months only (a partial first/last month would fake a dip).
+	measure 'Applications trend' =
+			VAR _selMin = CALCULATE(MIN('hiring'[applied_date]), ALLSELECTED('hiring'))
+			VAR _selMax = MIN(CALCULATE(MAX('hiring'[applied_date]), ALLSELECTED('hiring')), DATE(2026, 9, 19))
+			VAR _mStart = EOMONTH(MIN('hiring'[applied_month]), -1) + 1
+			VAR _mEnd = EOMONTH(MAX('hiring'[applied_month]), 0)
+			RETURN IF(_mStart < DATE(YEAR(_selMin), MONTH(_selMin), DAY(_selMin)) || _mEnd > DATE(YEAR(_selMax), MONTH(_selMax), DAY(_selMax)), BLANK(), [Applications])
+		formatString: #,0
+		lineageTag: <guid>
+		displayFolder: Design measures
+
+	column application_id
+		dataType: string
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: application_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column applied_date
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: applied_date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column source
+		dataType: string
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: source
+
+		annotation SummarizationSetBy = Automatic
+
+	column recruiter
+		dataType: string
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: recruiter
+
+		annotation SummarizationSetBy = Automatic
+
+	column department
+		dataType: string
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: department
+
+		annotation SummarizationSetBy = Automatic
+
+	column seniority
+		dataType: string
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: seniority
+
+		annotation SummarizationSetBy = Automatic
+
+	column location
+		dataType: string
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: location
+
+		annotation SummarizationSetBy = Automatic
+
+	column stage_reached
+		dataType: string
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: stage_reached
+
+		annotation SummarizationSetBy = Automatic
+
+	column reached_screen
+		dataType: int64
+		formatString: 0
+		lineageTag: <guid>
+		summarizeBy: sum
+		sourceColumn: reached_screen
+
+		annotation SummarizationSetBy = Automatic
+
+	column reached_interview
+		dataType: int64
+		formatString: 0
+		lineageTag: <guid>
+		summarizeBy: sum
+		sourceColumn: reached_interview
+
+		annotation SummarizationSetBy = Automatic
+
+	column reached_offer
+		dataType: int64
+		formatString: 0
+		lineageTag: <guid>
+		summarizeBy: sum
+		sourceColumn: reached_offer
+
+		annotation SummarizationSetBy = Automatic
+
+	column reached_hire
+		dataType: int64
+		formatString: 0
+		lineageTag: <guid>
+		summarizeBy: sum
+		sourceColumn: reached_hire
+
+		annotation SummarizationSetBy = Automatic
+
+	column days_to_hire
+		dataType: double
+		lineageTag: <guid>
+		summarizeBy: sum
+		sourceColumn: days_to_hire
+
+		annotation SummarizationSetBy = Automatic
+
+	column placement_fee_eur
+		dataType: double
+		lineageTag: <guid>
+		summarizeBy: sum
+		sourceColumn: placement_fee_eur
+
+		annotation SummarizationSetBy = Automatic
+
+	column applied_month
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: <guid>
+		summarizeBy: none
+		sourceColumn: applied_month
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	partition hiring = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents("<csv>"),[Delimiter=",", Columns=15, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+				    #"Changed Type" = Table.TransformColumnTypes(#"Promoted Headers",{{"application_id", type text}, {"applied_date", type date}, {"source", type text}, {"recruiter", type text}, {"department", type text}, {"seniority", type text}, {"location", type text}, {"stage_reached", type text}, {"reached_screen", Int64.Type}, {"reached_interview", Int64.Type}, {"reached_offer", Int64.Type}, {"reached_hire", Int64.Type}, {"days_to_hire", type number}, {"placement_fee_eur", type number}, {"applied_month", type date}})
+				in
+				    #"Changed Type"
+
+	annotation PBI_ResultType = Table

@@ -19,11 +19,13 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(HERE)          # the gate scripts live at the repo root
 sys.path.insert(0, ROOT)
+sys.path.insert(0, HERE)
 
 import pbip_scaffold                                            # noqa: E402
 import svg_measures as S                                        # noqa: E402
+from _offline import SCHEMA_SKIP_REASON, schemas_available      # noqa: E402
 from brand_styles import derive_theme_pair                      # noqa: E402
 from pbir_editor import PbirEditor                              # noqa: E402
 from tmdl_editor import TmdlModel                               # noqa: E402
@@ -224,18 +226,21 @@ def gate(script, target, want):
 def main():
     paths, built, samples = build()
     print("\n== gates ==")
-    ok = [
-        gate("_check_model_names.py", OUT, "NAMES OK"),
-        gate("_validate_pbir.py", paths["report"], "ALL VALID"),
-        gate("_validate_svg_measures.py", OUT, "SVG MEASURES OK"),
-    ]
+    ok = [gate("_check_model_names.py", OUT, "NAMES OK")]
+    # the PBIR gate needs Microsoft's schemas; with no warm cache and no route
+    # to them it cannot run at all, and a skip beats a false failure
+    if schemas_available():
+        ok.append(gate("_validate_pbir.py", paths["report"], "ALL VALID"))
+    else:
+        print("  %-28s SKIP  %s" % ("_validate_pbir.py", SCHEMA_SKIP_REASON))
+    ok.append(gate("_validate_svg_measures.py", OUT, "SVG MEASURES OK"))
     print("\nproject : %s" % paths["pbip"])
     print("samples : %s" % samples)
     print("cards   : %d SVG measures on %d card(s)" % (len(built), len(built)))
     if not all(ok):
         print("\nSMOKE FAILED")
         return 1
-    print("\nSVG SMOKE OK — all three gates passed")
+    print("\nSVG SMOKE OK — %d gate(s) passed" % len(ok))
     return 0
 
 

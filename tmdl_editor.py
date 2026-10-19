@@ -149,7 +149,8 @@ class TmdlTableFile:
 
     def build_measure_lines(self, name: str, dax: str, format_string: str = None,
                             display_folder: str = None, description: str = None,
-                            lineage_tag: str = None) -> list:
+                            lineage_tag: str = None,
+                            data_category: str = None) -> list:
         lines = []
         if description:
             for d in str(description).split("\n"):
@@ -166,11 +167,15 @@ class TmdlTableFile:
         lines.append(f"\t\tlineageTag: {lineage_tag or uuid.uuid4()}")
         if display_folder:
             lines.append(f"\t\tdisplayFolder: {display_folder}")
+        if data_category:
+            # last in the block, where Power BI itself writes it
+            lines.append(f"\t\tdataCategory: {data_category}")
         lines.append("")
         return lines
 
     def upsert_measure(self, name: str, dax: str, format_string: str = None,
-                       display_folder: str = None, description: str = None) -> str:
+                       display_folder: str = None, description: str = None,
+                       data_category: str = None) -> str:
         block = self.measure_block(name)
         # preserve the existing lineageTag on update — external tools track
         # objects by it; regenerating one per edit churns diffs for nothing
@@ -183,7 +188,8 @@ class TmdlTableFile:
                     break
         new_lines = self.build_measure_lines(name, dax, format_string,
                                              display_folder, description,
-                                             lineage_tag=existing_tag)
+                                             lineage_tag=existing_tag,
+                                             data_category=data_category)
         if block:
             s, e = block
             # a measure's /// description sits ABOVE the `measure` line, so it
@@ -274,34 +280,47 @@ class TmdlModel:
     def add_measure(self, table: str, name: str, dax: str,
                     format_string: str = None, display_folder: str = None,
                     description: str = None, force: bool = False,
-                    text_measure: bool = False) -> None:
+                    text_measure: bool = False,
+                    data_category: str = None) -> None:
         """
         Create or update a measure. ALWAYS pass format_string (see module
         docstring for common formats) — unformatted KPI numbers look broken.
         text_measure=True: the measure returns text or a hex color (labels,
         conditional-format colors) — no format string applies, no warning.
+
+        data_category="ImageUrl": the measure returns an image reference rather
+        than a value — a URL, or an SVG document as a data URI (svg_measures).
+        Without it a cardVisual bound to the measure renders the raw string
+        instead of the picture, and nothing reports an error. Implies
+        text_measure.
         """
         self._guard(force)
+        if data_category:
+            text_measure = True
         if not format_string and not text_measure:
             print(f"  [warn] measure '{name}' has no format_string — "
                   "KPI cards will show raw unformatted numbers")
         tf = self._table_file(table)
-        action = tf.upsert_measure(name, dax, format_string, display_folder, description)
+        action = tf.upsert_measure(name, dax, format_string, display_folder,
+                                   description, data_category)
         tf.save()
         print(f"  [{table}] {action} measure '{name}'"
-              + (f"  ({format_string})" if format_string else ""))
+              + (f"  ({format_string})" if format_string else "")
+              + (f"  [{data_category}]" if data_category else ""))
 
     def add_measures(self, table: str, measures: list, force: bool = False) -> None:
         """
         Batch create/update.
-        measures: [{"name": ..., "dax": ..., "format_string": ...}, ...]
+        measures: [{"name": ..., "dax": ..., "format_string": ...,
+                    "data_category": ...}, ...]
         """
         self._guard(force)
         tf = self._table_file(table)
         for m in measures:
             action = tf.upsert_measure(
                 m["name"], m["dax"], m.get("format_string"),
-                m.get("display_folder"), m.get("description"))
+                m.get("display_folder"), m.get("description"),
+                m.get("data_category"))
             print(f"  [{table}] {action} measure '{m['name']}'"
                   + (f"  ({m.get('format_string')})" if m.get("format_string") else ""))
         tf.save()
@@ -316,6 +335,103 @@ class TmdlModel:
         else:
             print(f"  [{table}] measure '{name}' not found")
         return ok
+
+    # ── calculated tables ──────────────────────────────────────────────────────
+
+    _DTYPES = {"string": "string", "int64": "int64", "int": "int64",
+               "double": "double", "decimal": "decimal", "boolean": "boolean",
+               "dateTime": "dateTime", "date": "dateTime"}
+
+    def _model_path(self) -> str:
+        return os.path.join(self.folder, "definition", "model.tmdl")
+
+    def add_calculated_table(self, name: str, dax: str, columns: list,
+                             force: bool = False) -> str:
+        """
+        Create (or replace) a DAX calculated table and reference it from
+        model.tmdl, so Power BI loads it with the rest of the model.
+
+        A disconnected one-column table is how a report gets a switch that no
+        data feeds — the Light/Dark toggle, a period picker, a metric chooser:
+        a slicer binds to the column and a measure reads it back with
+        SELECTEDVALUE.
+
+            m.add_calculated_table(
+                "Theme",
+                'DATATABLE ( "Theme", STRING, "Ordre", INTEGER, '
+                '{ { "Light", 1 }, { "Dark", 2 } } )',
+                [{"name": "Theme", "type": "string", "sort_by": "Ordre"},
+                 {"name": "Ordre", "type": "int64", "hidden": True,
+                  "format": "0"}])
+
+        columns: [{"name", "type", "hidden", "format", "sort_by"}] — these must
+        match the DATATABLE's own column names and order, because TMDL does not
+        derive them from the expression.
+        """
+        self._guard(force)
+        if not columns:
+            raise ValueError("a calculated table needs its columns declared")
+        path = os.path.join(self.tables_dir, f"{name}.tmdl")
+        # keep the table's identity across rebuilds — external tools track it
+        tag = None
+        if os.path.exists(path):
+            for line in open(path, encoding="utf-8-sig"):
+                if line.strip().startswith("lineageTag:"):
+                    tag = line.split(":", 1)[1].strip()
+                    break
+        L = [f"table {_quote(name)}", f"\tlineageTag: {tag or uuid.uuid4()}", ""]
+        for c in columns:
+            dtype = self._DTYPES.get(c.get("type", "string"))
+            if dtype is None:
+                raise ValueError(f"column '{c['name']}': unknown type "
+                                 f"{c.get('type')!r}, choose from {sorted(self._DTYPES)}")
+            L.append(f"\tcolumn {_quote(c['name'])}")
+            L.append(f"\t\tdataType: {dtype}")
+            if c.get("hidden"):
+                L.append("\t\tisHidden")
+            if c.get("format"):
+                L.append(f"\t\tformatString: {c['format']}")
+            L.append(f"\t\tlineageTag: {uuid.uuid4()}")
+            L.append("\t\tsummarizeBy: none")
+            # calculated-table columns name their source in brackets; an
+            # unbracketed sourceColumn is the M-partition spelling and makes
+            # the table fail to load
+            L.append(f"\t\tsourceColumn: [{c['name']}]")
+            if c.get("sort_by"):
+                L.append(f"\t\tsortByColumn: {_quote(c['sort_by'])}")
+            L.append("")
+            L.append("\t\tannotation SummarizationSetBy = Automatic")
+            L.append("")
+        L.append(f"\tpartition {_quote(name)} = calculated")
+        L.append("\t\tmode: import")
+        L.append(f"\t\tsource = {dax.strip()}")
+        L.append("")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write("\r\n".join(L))
+
+        self._ref_table(name)
+        print(f"  calculated table '{name}' ({len(columns)} column(s)) -> {path}")
+        return path
+
+    def _ref_table(self, name: str) -> None:
+        """Add `ref table <name>` to model.tmdl if it is not already there.
+        Without the ref the .tmdl file sits in the folder and is ignored."""
+        path = self._model_path()
+        if not os.path.exists(path):
+            print(f"  [warn] {path} not found — add 'ref table {name}' yourself")
+            return
+        text = open(path, encoding="utf-8-sig").read()
+        ref = f"ref table {_quote(name)}"
+        if re.search(r"(?m)^%s\s*$" % re.escape(ref), text):
+            return
+        eol = "\r\n" if "\r\n" in text else "\n"
+        lines = text.split(eol)
+        # before `ref cultureInfo`, which Power BI writes last
+        at = next((i for i, l in enumerate(lines)
+                   if l.startswith("ref cultureInfo")), len(lines))
+        lines[at:at] = [ref, ""]
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(eol.join(lines))
 
     # ── relationships ──────────────────────────────────────────────────────────
 

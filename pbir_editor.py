@@ -832,6 +832,94 @@ class PbirPage:
             title=title, style=style, z=z, objects=objects,
         ))
 
+    def add_svg_card(self, table: str, measure: str,
+                     x: int = 20, y: int = 20, w: int = 348, h: int = 119,
+                     z: int = 1000, alt: str = None, slot: bool = False,
+                     image_fit: str = "Fit", name: str = None) -> None:
+        """
+        A measure that returns an SVG document, rendered as the card's image —
+        the whole visual IS the drawing (svg_measures composes the measure).
+
+        The card is stripped of everything Power BI would otherwise draw: no
+        callout value, no label, no background, border, shadow, header, title
+        or tooltip, and zero padding on every layer. Anything left on would
+        show through as chrome around a drawing that already has its own.
+
+            card = svg_measures.kpi_sparkbar(348, 119, "Hires", ...)
+            model.add_measure("_Measures", "KPI hires (SVG)", card.dax,
+                              text_measure=True, data_category="ImageUrl")
+            page.add_svg_card("_Measures", "KPI hires (SVG)", 40, 100,
+                              card.width, card.height)
+
+        The measure MUST carry dataCategory: ImageUrl, and the SVG's declared
+        width/height must equal w/h — _validate_svg_measures.py gates both.
+
+        slot=False (default) names the visual "ns_...", so generate_background()
+        does not draw a card slot behind a card that paints its own.
+        """
+        mf = self._meas(table, measure)
+        ent = mf["field"]["Measure"]["Expression"]["SourceRef"]["Entity"]
+        prop = mf["field"]["Measure"]["Property"]
+        mref = {"expr": {"Measure": {"Expression": {"SourceRef": {"Entity": ent}},
+                                     "Property": prop}}}
+        off = [{"properties": {"show": _lit_bool(False)}}]
+        objects = {
+            # the value and the label are the card's own text layers — the
+            # drawing replaces both
+            "value": [{"properties": {"show": _lit_bool(False)}},
+                      {"properties": {"show": _lit_bool(False)},
+                       "selector": {"id": "default"}}],
+            "label": [{"properties": {"show": _lit_bool(False)},
+                       "selector": {"id": "default"}}],
+            "layout": [
+                {"properties": {"backgroundShow": _lit_bool(False),
+                                "topOuterMargin": _lit_int(0),
+                                "bottomOuterMargin": _lit_int(0),
+                                "leftOuterMargin": _lit_int(0),
+                                "rightOuterMargin": _lit_int(0),
+                                "paddingUniform": _lit_int(0)},
+                 "selector": {"id": "default"}},
+                # calloutSize 0 gives the image the whole card; without it the
+                # drawing is squeezed into whatever the callout leaves
+                {"properties": {"contentOrder": _lit_str("image_referenceLabel_callout"),
+                                "calloutSize": _lit_num(0)}},
+            ],
+            "cardCalloutArea": [{"properties": {"paddingUniform": _lit_int(0),
+                                                "paddingIndividual": _lit_bool(False)},
+                                 "selector": {"id": "default"}}],
+            "padding": [{"properties": {"paddingUniform": _lit_int(0),
+                                        "paddingIndividual": _lit_bool(False)},
+                         "selector": {"id": "default"}}],
+            "fillCustom": [{"properties": {"show": _lit_bool(False)}}],
+            "outline": [{"properties": {"show": _lit_bool(False)},
+                         "selector": {"id": "default"}}],
+            "divider": [{"properties": {"show": _lit_bool(False)},
+                         "selector": {"id": "default"}}],
+            "cardImage": [{"properties": {
+                "show": _lit_bool(True),
+                "imageType": _lit_str("imageData"),
+                "imageData": mref,
+                "imageDataFit": _lit_str(image_fit),
+                "imageHeight": _lit_int(round(h)),
+            }, "selector": {"id": "default"}}],
+        }
+        v = _make_visual(
+            name or _uid(), x, y, w, h, "cardVisual",
+            query_state={"Data": {"projections": [mf]}},
+            title=None, z=z, objects=objects, background=False,
+        )
+        vco = v["visual"]["visualContainerObjects"]
+        for key in ("visualHeader", "title", "background", "border", "dropShadow",
+                    "visualTooltip"):
+            vco[key] = list(off)
+        vco["padding"] = [{"properties": {"top": _lit_num(0), "bottom": _lit_num(0),
+                                          "left": _lit_num(0), "right": _lit_num(0)}}]
+        vco["general"] = [{"properties": {
+            "altText": _lit_str(alt or f"Chart: {measure}")}}]
+        if not slot and not v["name"].startswith("ns_"):
+            v["name"] = "ns_" + v["name"][:17]
+        self._visuals.append(v)
+
     def add_kpi_tile(self, title: str, table: str, measure: str,
                      note_measure=None, note_color_measure=None,
                      trend_col=None, trend_measure=None,
@@ -2386,6 +2474,7 @@ class PbirEditor:
         "page_navigator": "add_page_navigator", "nav": "add_page_navigator",
         "clear_button": "add_clear_button",
         "text_measure": "add_text_measure",
+        "svg_card": "add_svg_card", "svg": "add_svg_card",
     }
 
     def build_from_spec(self, spec: dict, force: bool = False) -> str:
@@ -2449,9 +2538,13 @@ class PbirEditor:
                     vs["w"] = vs.pop("width")
                 if "height" in vs:
                     vs["h"] = vs.pop("height")
-                floating = vs.pop("slot", True) is False
                 method_fn = getattr(page, method)
                 params = inspect.signature(method_fn).parameters
+                # a builder that takes "slot" itself owns the decision —
+                # add_svg_card floats by default and the spec must be able to
+                # turn that off
+                floating = ("slot" not in params
+                            and vs.pop("slot", True) is False)
                 if "style" not in params:
                     vs.pop("style", None)
                 if "force" in params:            # propagate build-level force
